@@ -1,4 +1,4 @@
-import { Message } from '../../db/models';
+import { Message, User } from '../../db/models';
 
 const map = new Map();
 
@@ -8,33 +8,55 @@ const connectionCb = (socket, request) => {
   map.set(userId, { ws: socket, user: request.session.user });
   socket.on('error', console.error);
 
-  socket.on('open', () => {
-    map.forEach(({ ws }) => {
-      ws.send(
-        JSON.stringify({
-          type: 'SET_USERS',
-          payload: [...map.values()].map(({ user }) => user),
-        }),
-      );
-    });
+  map.forEach(({ ws }) => {
+    ws.send(
+      JSON.stringify({
+        type: 'SET_USERS',
+        payload: [...map.values()].map(({ user }) => user),
+      }),
+    );
   });
 
   socket.on('message', async (message) => {
-    const fromFront = JSON.parse(message);
-    switch (fromFront.type) {
-      case 'message':
-        // Message.create(fromFront.payload).then((newMessage) => {
-        map.forEach(({ ws, user }) => {
+    const actionFromFront = JSON.parse(message);
+    const { type, payload } = actionFromFront;
+    switch (type) {
+      case 'NEW_MESSAGE':
+        Message.create({ text: payload, authorId: userId }).then(async (newMessage) => {
+          const messageWithAuthor = await Message.findOne({
+            where: { id: newMessage.id },
+            include: User,
+          });
+          map.forEach(({ ws }) => {
+            ws.send(
+              JSON.stringify({
+                type: 'ADD_MESSAGE',
+                payload: messageWithAuthor,
+              }),
+            );
+          });
+        });
+        break;
+      case 'STARTED_TYPING':
+        map.forEach(({ ws }) => {
           ws.send(
             JSON.stringify({
-              type: 'SET_MESSAGES',
-              payload: { message: fromFront.payload },
+              type: 'SET_WRITER',
+              payload: request.session.user,
             }),
           );
         });
-        // });
         break;
-
+      case 'STOPPED_TYPING':
+        map.forEach(({ ws }) => {
+          ws.send(
+            JSON.stringify({
+              type: 'SET_WRITER',
+              payload: null,
+            }),
+          );
+        });
+        break;
       default:
         break;
     }
